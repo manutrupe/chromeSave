@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ChromeSave</title>
+    <link rel="stylesheet" href="common.css" />
+    <style>
+      body {
+        width: 300px;
+        padding: 14px;
+      }
+      header {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      header h1 {
+        font-size: 16px;
+        margin: 0;
+      }
+      .stack {
+        display: grid;
+        gap: 8px;
+      }
+      .stack button {
+        width: 100%;
+      }
+      #current {
+        word-break: break-all;
+        margin-bottom: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <img src="../icons/icon32.png" alt="" width="28" height="28" />
+      <h1>ChromeSave</h1>
+      <span class="badge" id="status"></span>
+    </header>
+    <p class="muted" id="current"></p>
+    <div class="stack">
+      <button class="primary hidden" id="setup">Set up fingerprint / face</button>
+      <button class="hidden" id="protect">Protect this site</button>
+      <button class="hidden" id="lock-site">Lock this site now</button>
+      <button id="lock-all">Lock all sites now</button>
+      <button id="toggle"></button>
+      <button id="settings">Settings</button>
+    </div>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

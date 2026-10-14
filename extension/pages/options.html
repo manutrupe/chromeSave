@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ChromeSave settings</title>
+    <link rel="icon" href="../icons/icon32.png" />
+    <link rel="stylesheet" href="common.css" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="row">
+        <img src="../icons/icon48.png" alt="" width="40" height="40" />
+        <div>
+          <h1>ChromeSave</h1>
+          <p class="muted">Lock the sites you choose behind your fingerprint or face.</p>
+        </div>
+      </header>
+
+      <p class="error" id="error" role="alert"></p>
+
+      <!-- First run -->
+      <section class="card hidden" id="setup">
+        <h2>Set up fingerprint / face unlock</h2>
+        <p>
+          ChromeSave uses your computer's built-in authenticator: <strong>Windows Hello</strong>
+          (fingerprint, face or PIN) on Windows, or <strong>Touch ID</strong> on Mac. Nothing leaves
+          your device.
+        </p>
+        <p class="error hidden" id="no-platform">
+          No built-in fingerprint/face authenticator was detected. Set up Windows Hello
+          (Settings › Accounts › Sign-in options) or Touch ID (System Settings › Touch ID &amp;
+          Password) and reload this page.
+        </p>
+        <button class="primary" id="register">Set up now</button>
+      </section>
+
+      <!-- Registered, not yet verified on this page -->
+      <section class="card hidden" id="locked">
+        <h2>Settings are locked</h2>
+        <p class="muted">
+          Verify it's you before changing protected sites or turning protection off.
+        </p>
+        <div class="row">
+          <button class="primary" id="verify">Verify with fingerprint or face</button>
+          <button id="lock-all-locked">Lock all sites now</button>
+        </div>
+        <p class="muted status-line" id="locked-status"></p>
+      </section>
+
+      <!-- Management -->
+      <div class="hidden" id="manage">
+        <section class="card">
+          <div class="row spread">
+            <div>
+              <h2>Protection</h2>
+              <p class="muted" id="protection-text"></p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="enabled" />
+              <span aria-hidden="true"></span>
+              <span class="sr">Protection enabled</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Protected sites</h2>
+          <p class="muted">
+            Enter a site such as <code>mail.google.com</code>. Subdomains are included. Add a path
+            (<code>icloud.com/mail</code>) to protect only part of a site.
+          </p>
+          <form class="row" id="add-form">
+            <input type="text" id="add-input" placeholder="mail.google.com" autocomplete="off" />
+            <button class="primary" type="submit">Add</button>
+          </form>
+          <div class="row presets" id="presets"></div>
+          <ul class="sites" id="sites"></ul>
+        </section>
+
+        <section class="card">
+          <h2>Behaviour</h2>
+          <label class="field">
+            <span>After unlocking, keep a site open for</span>
+            <select id="unlock-minutes"></select>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="lock-on-system-lock" />
+            Lock all sites again when the computer is locked or goes to sleep
+          </label>
+          <label class="check">
+            <input type="checkbox" id="guard-extensions" />
+            Require fingerprint / face to open the browser's extensions page (makes it harder to
+            switch ChromeSave off or remove it)
+          </label>
+          <div class="row actions">
+            <button id="lock-all">Lock all sites now</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Device</h2>
+          <p class="muted" id="device-text"></p>
+          <div class="row">
+            <button id="reregister">Register again</button>
+            <button class="danger" id="reset">Remove fingerprint / face and turn off</button>
+          </div>
+        </section>
+      </div>
+
+      <footer class="muted small">
+        Note: browser-level settings can't be fully blocked by any extension. See the README for
+        the limits of what ChromeSave can enforce.
+      </footer>
+    </div>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

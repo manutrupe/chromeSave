@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Locked – ChromeSave</title>
+    <link rel="icon" href="../icons/icon32.png" />
+    <link rel="stylesheet" href="common.css" />
+    <link rel="stylesheet" href="lock.css" />
+  </head>
+  <body>
+    <main class="card lock">
+      <img src="../icons/icon128.png" alt="" width="72" height="72" />
+      <h1 id="title">This page is locked</h1>
+      <p class="muted" id="site"></p>
+      <button class="primary big" id="unlock">Unlock with fingerprint or face</button>
+      <p class="muted small" id="hint">
+        Windows Hello on Windows, Touch ID on Mac. Your device PIN or password also works if the
+        system offers it.
+      </p>
+      <p class="error" id="error" role="alert"></p>
+      <p class="small"><a href="options.html" target="_blank">ChromeSave settings</a></p>
+    </main>
+    <script type="module" src="lock.js"></script>
+  </body>
+</html>
