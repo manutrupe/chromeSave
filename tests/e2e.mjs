@@ -148,6 +148,71 @@ try {
   await page.waitForURL((u) => u.href.startsWith('chrome://extensions'));
   log('chrome://extensions requires verification, then opens');
 
+  const openSettings = async () => {
+    await page.goto(OPTIONS);
+    await page.click('#verify');
+    await page.locator('#manage').waitFor();
+  };
+  const onLockScreen = () => page.waitForURL((u) => u.href.startsWith(LOCK));
+
+  // --- ask mode: every time the page is opened ---------------------------------
+  await openSettings();
+  await page.selectOption('#ask-mode', 'open');
+  await page.locator('#ask-mode-hint', { hasText: 'Each tab asks separately' }).waitFor();
+  assert.ok(await page.locator('#unlock-minutes-field').isHidden(), 'duration hidden in per-open mode');
+  await page.goto(MAIL).catch(() => {});
+  await page.waitForURL(MAIL);
+  await page.locator('#content').waitFor();
+  await page.evaluate(() => history.pushState({}, '', '/inbox/thread-1'));
+  await page.waitForTimeout(500);
+  assert.match(page.url(), /\/inbox\/thread-1$/, 'in-page navigation does not re-lock');
+  await setVerified(false);
+  await page.reload().catch(() => {});
+  await onLockScreen();
+  log('"every page open": reloading asks again (in-page navigation does not)');
+
+  const second = await context.newPage();
+  await second.goto(MAIL).catch(() => {});
+  await second.waitForURL((u) => u.href.startsWith(LOCK));
+  await second.close();
+  await page.bringToFront();
+  log('"every page open": the same site in another tab asks separately');
+
+  await setVerified(true);
+  await page.click('#unlock');
+  await page.waitForURL((u) => u.href.startsWith(MAIL.replace('/inbox', '')));
+  await page.goto(OTHER);
+  await setVerified(false);
+  await page.goto(MAIL).catch(() => {});
+  await onLockScreen();
+  log('"every page open": leaving the site and coming back asks again');
+
+  // --- per-site override: every tab switch -------------------------------------
+  await setVerified(true);
+  await openSettings();
+  await page.locator('#sites li select').selectOption('switch');
+  await page.waitForFunction(() => {
+    const sel = document.querySelector('#sites li select');
+    return sel && sel.value === 'switch';
+  });
+  s = await state();
+  assert.equal(s.settings.sites[0].askMode, 'switch');
+  assert.equal(s.settings.askMode, 'open');
+  await page.goto(MAIL).catch(() => {});
+  await page.waitForURL(MAIL);
+  await page.locator('#content').waitFor();
+  const other = await context.newPage();
+  await other.goto(OTHER);
+  await other.bringToFront();
+  await onLockScreen();
+  log('"every tab switch" (per-site override): switching away locks the tab');
+
+  await page.bringToFront();
+  await page.waitForURL(MAIL);
+  await page.locator('#content').waitFor();
+  await other.close();
+  log('"every tab switch": switching back prompts for verification, then reopens the page');
+
   // --- turn protection off with verification -----------------------------------
   await page.goto(OPTIONS);
   await page.click('#verify');

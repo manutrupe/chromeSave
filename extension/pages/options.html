@@ -69,7 +69,8 @@
           <h2>Protected sites</h2>
           <p class="muted">
             Enter a site such as <code>mail.google.com</code>. Subdomains are included. Add a path
-            (<code>icloud.com/mail</code>) to protect only part of a site.
+            (<code>icloud.com/mail</code>) to protect only part of a site. Each site can override
+            when to ask (see <em>Behaviour</em> below).
           </p>
           <form class="row" id="add-form">
             <input type="text" id="add-input" placeholder="mail.google.com" autocomplete="off" />
@@ -82,6 +83,15 @@
         <section class="card">
           <h2>Behaviour</h2>
           <label class="field">
+            <span>Ask for fingerprint / face</span>
+            <select id="ask-mode">
+              <option value="session">Once, then keep the site open for a while</option>
+              <option value="open">Every time the page is opened</option>
+              <option value="switch">Every time I switch to the tab</option>
+            </select>
+          </label>
+          <p class="muted hint" id="ask-mode-hint"></p>
+          <label class="field" id="unlock-minutes-field">
             <span>After unlocking, keep a site open for</span>
             <select id="unlock-minutes"></select>
           </label>

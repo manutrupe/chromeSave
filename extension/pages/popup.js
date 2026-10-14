@@ -36,7 +36,8 @@ function openOptions(suffix = '') {
   if (!host) {
     $('current').textContent = 'This page cannot be protected.';
   } else if (site) {
-    const open = site.id in unlocked;
+    const open =
+      site.id in unlocked || state.tabUnlocks[tab.id]?.siteId === site.id;
     $('current').textContent = `${host} is protected${open ? ' (currently unlocked)' : ''}.`;
     $('lock-site').classList.toggle('hidden', !open);
     $('lock-site').addEventListener('click', async () => {

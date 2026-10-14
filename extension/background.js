@@ -6,6 +6,13 @@
 //   * a session "allow" rule with higher priority is added while a site is
 //     unlocked (session rules are wiped when Chrome closes, so everything is
 //     locked again on the next start).
+//
+// When to ask is configurable globally and per site ("ask mode"):
+//   * "session": one check unlocks the site in every tab for a set time;
+//   * "open":    each page load needs a check. The unlock belongs to one tab
+//                and is used up once the page has loaded, so a reload, a new
+//                tab or coming back to the site locks it again;
+//   * "switch":  like "open", and the tab also locks when you leave it.
 // Every unlock and every settings change requires a WebAuthn assertion from
 // the platform authenticator registered at setup, verified here.
 
@@ -21,12 +28,17 @@ const CHALLENGE_TTL_MS = 2 * 60 * 1000;
 const ADMIN_TTL_MS = 10 * 60 * 1000;
 const EXTENSIONS_PAGE_TTL_MS = 5 * 60 * 1000;
 const SESSION_RULE_OFFSET = 10000;
+const TAB_RULE_OFFSET = 20000;
+// How long a per-tab unlock waits for its page to load before it lapses.
+const TAB_PENDING_TTL_MS = 2 * 60 * 1000;
+const ASK_MODES = ['session', 'open', 'switch'];
 const MAX_SITES = 500;
 const UNLOCK_CHOICES = [0, 1, 5, 15, 30, 60, 240];
 
 const DEFAULT_SETTINGS = {
   enabled: false,
   sites: [],
+  askMode: 'session',
   unlockMinutes: 15,
   lockOnSystemLock: true,
   guardExtensionsPage: true,
@@ -45,9 +57,16 @@ async function getCredential() {
 }
 
 async function getSession() {
-  const s = await chrome.storage.session.get(['unlocked', 'admin', 'challenges', 'extensionsUntil']);
+  const s = await chrome.storage.session.get([
+    'unlocked',
+    'tabUnlocks',
+    'admin',
+    'challenges',
+    'extensionsUntil',
+  ]);
   return {
     unlocked: s.unlocked || {},
+    tabUnlocks: s.tabUnlocks || {},
     admin: s.admin || null,
     challenges: s.challenges || {},
     extensionsUntil: s.extensionsUntil || 0,
@@ -67,6 +86,28 @@ async function getUnlocked() {
   return live;
 }
 
+/**
+ * Per-tab unlocks: tabId -> { siteId, pendingUntil }. While `pendingUntil` is
+ * set, a tab-scoped DNR rule lets the next page load through; once the page
+ * has loaded it is cleared and the unlock lasts as long as that page stays
+ * open in the tab.
+ */
+async function getTabUnlocks() {
+  const { tabUnlocks } = await getSession();
+  const now = Date.now();
+  const live = Object.fromEntries(
+    Object.entries(tabUnlocks).filter(([, g]) => !g.pendingUntil || g.pendingUntil > now),
+  );
+  if (Object.keys(live).length !== Object.keys(tabUnlocks).length) {
+    await chrome.storage.session.set({ tabUnlocks: live });
+  }
+  return live;
+}
+
+function modeFor(site, settings) {
+  return ASK_MODES.includes(site.askMode) ? site.askMode : settings.askMode;
+}
+
 function isActive(settings, credential) {
   return Boolean(settings.enabled && credential && settings.sites.length);
 }
@@ -82,10 +123,11 @@ function syncRules() {
 }
 
 async function doSyncRules() {
-  const [settings, credential, unlocked] = await Promise.all([
+  const [settings, credential, unlocked, tabUnlocks] = await Promise.all([
     getSettings(),
     getCredential(),
     getUnlocked(),
+    getTabUnlocks(),
   ]);
   const active = isActive(settings, credential);
   const sites = active ? settings.sites : [];
@@ -100,7 +142,7 @@ async function doSyncRules() {
     condition: { regexFilter: patternToRegex(site), resourceTypes: ['main_frame'] },
   }));
   const allowRules = sites.flatMap((site, i) =>
-    site.id in unlocked
+    modeFor(site, settings) === 'session' && site.id in unlocked
       ? [
           {
             id: SESSION_RULE_OFFSET + i + 1,
@@ -111,6 +153,20 @@ async function doSyncRules() {
         ]
       : [],
   );
+  Object.entries(tabUnlocks).forEach(([tabId, grant], i) => {
+    const site = sites.find((s) => s.id === grant.siteId);
+    if (!grant.pendingUntil || !site || modeFor(site, settings) === 'session') return;
+    allowRules.push({
+      id: TAB_RULE_OFFSET + i + 1,
+      priority: 3,
+      action: { type: 'allow' },
+      condition: {
+        regexFilter: patternToRegex(site),
+        resourceTypes: ['main_frame'],
+        tabIds: [Number(tabId)],
+      },
+    });
+  });
 
   const [oldDynamic, oldSession] = await Promise.all([
     chrome.declarativeNetRequest.getDynamicRules(),
@@ -127,11 +183,12 @@ async function doSyncRules() {
     addRules: redirectRules,
   });
 
-  await scheduleRelock(unlocked);
+  await scheduleRelock(unlocked, tabUnlocks);
 }
 
-async function scheduleRelock(unlocked) {
+async function scheduleRelock(unlocked, tabUnlocks = {}) {
   const expiries = Object.values(unlocked).filter((t) => t > 0);
+  for (const g of Object.values(tabUnlocks)) if (g.pendingUntil) expiries.push(g.pendingUntil);
   const { extensionsUntil } = await getSession();
   if (extensionsUntil > Date.now()) expiries.push(extensionsUntil);
   await chrome.alarms.clear('relock');
@@ -148,7 +205,7 @@ function lockPageFor(url) {
 }
 
 /** Returns the lock-page URL a tab should be sent to, or null if it may stay. */
-async function lockTargetFor(url) {
+async function lockTargetFor(url, tabId) {
   if (!url || url.startsWith(LOCK_URL)) return null;
   const [settings, credential] = await Promise.all([getSettings(), getCredential()]);
   if (!credential) return null;
@@ -162,8 +219,12 @@ async function lockTargetFor(url) {
   if (!isActive(settings, credential)) return null;
   const site = findSite(settings.sites, url);
   if (!site) return null;
-  const unlocked = await getUnlocked();
-  return site.id in unlocked ? null : lockPageFor(url);
+  if (modeFor(site, settings) === 'session') {
+    const unlocked = await getUnlocked();
+    return site.id in unlocked ? null : lockPageFor(url);
+  }
+  const tabUnlocks = await getTabUnlocks();
+  return tabUnlocks[tabId]?.siteId === site.id ? null : lockPageFor(url);
 }
 
 /** Sends every open tab showing a locked page to the lock screen. */
@@ -171,14 +232,14 @@ async function sweepTabs() {
   const tabs = await chrome.tabs.query({});
   await Promise.all(
     tabs.map(async (tab) => {
-      const target = await lockTargetFor(tab.pendingUrl || tab.url);
+      const target = await lockTargetFor(tab.pendingUrl || tab.url, tab.id);
       if (target) await chrome.tabs.update(tab.id, { url: target }).catch(() => {});
     }),
   );
 }
 
 async function lockAll() {
-  await chrome.storage.session.set({ unlocked: {}, admin: null, extensionsUntil: 0 });
+  await chrome.storage.session.set({ unlocked: {}, tabUnlocks: {}, admin: null, extensionsUntil: 0 });
   await syncRules();
   await sweepTabs();
 }
@@ -264,7 +325,8 @@ function sanitizeSites(input, previous) {
     const label = typeof raw === 'object' && typeof raw.label === 'string' ? raw.label.slice(0, 80) : '';
     // Keep ids stable so existing unlocks survive unrelated edits.
     const id = byPattern.get(key)?.id || randomB64u(9);
-    out.push({ id, ...parsed, label });
+    const askMode = ASK_MODES.includes(raw?.askMode) ? raw.askMode : 'default';
+    out.push({ id, ...parsed, label, askMode });
   }
   return out;
 }
@@ -275,6 +337,10 @@ async function updateSettings(patch) {
   if ('enabled' in patch) next.enabled = Boolean(patch.enabled);
   if ('lockOnSystemLock' in patch) next.lockOnSystemLock = Boolean(patch.lockOnSystemLock);
   if ('guardExtensionsPage' in patch) next.guardExtensionsPage = Boolean(patch.guardExtensionsPage);
+  if ('askMode' in patch) {
+    if (!ASK_MODES.includes(patch.askMode)) throw new Error('Invalid ask mode');
+    next.askMode = patch.askMode;
+  }
   if ('unlockMinutes' in patch) {
     const m = Number(patch.unlockMinutes);
     if (!UNLOCK_CHOICES.includes(m)) throw new Error('Invalid unlock duration');
@@ -287,7 +353,11 @@ async function updateSettings(patch) {
   const unlocked = await getUnlocked();
   const ids = new Set(next.sites.map((s) => s.id));
   const kept = Object.fromEntries(Object.entries(unlocked).filter(([id]) => ids.has(id)));
-  await chrome.storage.session.set({ unlocked: kept });
+  const tabUnlocks = await getTabUnlocks();
+  const keptTabs = Object.fromEntries(
+    Object.entries(tabUnlocks).filter(([, g]) => ids.has(g.siteId)),
+  );
+  await chrome.storage.session.set({ unlocked: kept, tabUnlocks: keptTabs });
   await syncRules();
   await sweepTabs();
   return next;
@@ -302,12 +372,15 @@ async function publicState(senderUrl) {
     getSession(),
   ]);
   const unlocked = await getUnlocked();
+  const tabUnlocks = await getTabUnlocks();
   return {
     registered: Boolean(credential),
     rpId: credential?.rpId,
     credentialId: credential?.id,
     settings,
     unlocked,
+    tabUnlocks,
+    askModes: ASK_MODES,
     adminActive: Boolean(session.admin && session.admin.exp > Date.now()),
     unlockChoices: UNLOCK_CHOICES,
     senderUrl,
@@ -361,12 +434,18 @@ const handlers = {
     } else {
       const settings = await getSettings();
       const site = findSite(settings.sites, url);
-      if (site) {
+      if (site && modeFor(site, settings) === 'session') {
         const unlocked = await getUnlocked();
         unlocked[site.id] = settings.unlockMinutes ? Date.now() + settings.unlockMinutes * 60000 : 0;
         await chrome.storage.session.set({ unlocked });
         await syncRules();
         await releaseWaitingTabs(site, tabId);
+      } else if (site && tabId !== undefined) {
+        // Only this tab, and only for the page load that follows.
+        const tabUnlocks = await getTabUnlocks();
+        tabUnlocks[tabId] = { siteId: site.id, pendingUntil: Date.now() + TAB_PENDING_TTL_MS };
+        await chrome.storage.session.set({ tabUnlocks });
+        await syncRules();
       }
     }
     if (tabId !== undefined && /^(https?|chrome|edge|brave|opera|vivaldi):/i.test(url)) {
@@ -390,7 +469,7 @@ const handlers = {
     await chrome.storage.local.remove('credential');
     const settings = await getSettings();
     await chrome.storage.local.set({ settings: { ...settings, enabled: false } });
-    await chrome.storage.session.set({ unlocked: {}, admin: null, extensionsUntil: 0 });
+    await chrome.storage.session.set({ unlocked: {}, tabUnlocks: {}, admin: null, extensionsUntil: 0 });
     await syncRules();
     return {};
   },
@@ -403,7 +482,11 @@ const handlers = {
   async lockSite(msg) {
     const unlocked = await getUnlocked();
     delete unlocked[msg.siteId];
-    await chrome.storage.session.set({ unlocked });
+    const tabUnlocks = await getTabUnlocks();
+    for (const [tabId, g] of Object.entries(tabUnlocks)) {
+      if (g.siteId === msg.siteId) delete tabUnlocks[tabId];
+    }
+    await chrome.storage.session.set({ unlocked, tabUnlocks });
     await syncRules();
     await sweepTabs();
     return {};
@@ -437,12 +520,67 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // --------------------------------------------------------------- events ----
 
+chrome.webNavigation.onCommitted.addListener(async ({ tabId, frameId, url }) => {
+  // Tracks per-tab unlocks across top-level page loads.
+  if (frameId !== 0) return;
+  const tabUnlocks = await getTabUnlocks();
+  const grant = tabUnlocks[tabId];
+  if (!grant) return;
+  const settings = await getSettings();
+  const site = settings.sites.find((s) => s.id === grant.siteId);
+  const onSite = site && findSite([site], url);
+  if (grant.pendingUntil && onSite) {
+    // The unlocked page has loaded: use up the unlock so that a reload or
+    // the next visit asks again, while this page keeps working.
+    tabUnlocks[tabId] = { siteId: grant.siteId, pendingUntil: 0 };
+  } else if (grant.pendingUntil && !url.startsWith(LOCK_URL)) {
+    // Still on the way (e.g. a sign-in redirect); keep waiting.
+    return;
+  } else if (!grant.pendingUntil && !onSite) {
+    // The tab left the site (or was locked); coming back asks again.
+    delete tabUnlocks[tabId];
+  } else {
+    return;
+  }
+  await chrome.storage.session.set({ tabUnlocks });
+  await syncRules();
+});
+
+chrome.tabs.onActivated.addListener(async () => {
+  // "switch" mode: lock any unlocked tab that is no longer in front.
+  const [settings, tabUnlocks] = await Promise.all([getSettings(), getTabUnlocks()]);
+  let changed = false;
+  for (const [tabId, grant] of Object.entries(tabUnlocks)) {
+    const site = settings.sites.find((s) => s.id === grant.siteId);
+    if (!site || modeFor(site, settings) !== 'switch' || grant.pendingUntil) continue;
+    const tab = await chrome.tabs.get(Number(tabId)).catch(() => null);
+    if (tab?.active) continue;
+    delete tabUnlocks[tabId];
+    changed = true;
+    if (tab?.url && findSite([site], tab.url)) {
+      chrome.tabs.update(tab.id, { url: lockPageFor(tab.url) }).catch(() => {});
+    }
+  }
+  if (changed) {
+    await chrome.storage.session.set({ tabUnlocks });
+    await syncRules();
+  }
+});
+
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const tabUnlocks = await getTabUnlocks();
+  if (!(tabId in tabUnlocks)) return;
+  delete tabUnlocks[tabId];
+  await chrome.storage.session.set({ tabUnlocks });
+  await syncRules();
+});
+
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   // Backstop for navigations DNR does not see: back/forward cache restores,
   // prerendered pages, in-app (history API) navigations after a relock, and
   // the browser's extensions page.
   if (!changeInfo.url) return;
-  const target = await lockTargetFor(changeInfo.url);
+  const target = await lockTargetFor(changeInfo.url, tabId);
   if (target) chrome.tabs.update(tabId, { url: target }).catch(() => {});
 });
 

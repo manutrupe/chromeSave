@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ChromeSave – Fingerprint & Face Lock",
   "short_name": "ChromeSave",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Lock the websites you choose (like your email) behind Windows Hello or Touch ID.",
   "minimum_chrome_version": "122",
   "icons": {
@@ -31,6 +31,7 @@
     "declarativeNetRequestWithHostAccess",
     "storage",
     "tabs",
+    "webNavigation",
     "alarms",
     "idle"
   ],

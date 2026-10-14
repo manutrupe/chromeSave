@@ -18,9 +18,15 @@ your email, behind your computer's built-in biometrics:
   (`icloud.com/mail`).
 - **Locked before it loads.** A protected page is swapped for a lock screen before
   the request leaves the browser, so the page never appears.
-- **Unlock with fingerprint / face.** After verification the site stays open for a
-  period you choose (1 minute to 4 hours, or until Chrome is closed). Other tabs
-  waiting on the same site unlock too.
+- **Choose when to ask.** Set it for all sites, and override it per site:
+  - **Once per session:** one check unlocks the site in all tabs for a period
+    you choose (1 minute to 4 hours, or until Chrome is closed).
+  - **Every time the page is opened:** each tab asks separately. A reload, a new
+    tab, or coming back after leaving the site asks again. Navigating inside the
+    site (e.g. opening emails in Gmail) does not.
+  - **Every time you switch to the tab:** as above, and the tab also locks as soon
+    as you switch to another tab. Switching back asks again, and the page reloads
+    after unlocking.
 - **Turning it off needs your fingerprint / face too.** Disabling protection,
   removing sites, or changing any setting asks for verification first.
 - **Extensions page guard (optional, on by default).** Opening `chrome://extensions`
@@ -50,6 +56,8 @@ work). Windows Hello or Touch ID must be set up on the computer:
 
 - **Toolbar button:** shows whether protection is on, protects the current site,
   locks the current site or all sites now, and opens the settings.
+- **Change when it asks:** settings › *Behaviour* › *Ask for fingerprint / face*
+  for all sites, or the drop-down next to a site to override it for that site.
 - **Turn protection off:** toolbar › *Turn off protection…* (or open the settings),
   verify, then switch **Protection** off.
 - **New computer, or Windows Hello / Touch ID was reset:** settings › *Register again*.
@@ -97,7 +105,11 @@ computer itself:
   login. ChromeSave adds a lock in front of the page; it doesn't replace your
   email password or 2-step verification.
 - Pages already open and unlocked keep running until the unlock period ends or you
-  lock them. At that point the tab is sent back to the lock screen.
+  lock them. At that point the tab is sent back to the lock screen. In the
+  per-page modes, an unlocked page stays unlocked while it remains open in its tab
+  (and, for "every tab switch", while you stay on that tab).
+- Locking a tab replaces the page with the lock screen, so anything unsaved in
+  that page is lost. Gmail and Outlook save drafts automatically.
 
 ## Development
 

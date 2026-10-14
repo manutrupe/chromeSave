@@ -22,6 +22,28 @@ async function refresh() {
   render();
 }
 
+const MODE_LABELS = {
+  session: 'Once per session',
+  open: 'Every page open',
+  switch: 'Every tab switch',
+};
+
+const MODE_HINTS = {
+  session:
+    'One check unlocks the site in all tabs until the time below runs out, Chrome closes, or the computer locks.',
+  open:
+    'Each tab asks separately. Reloading, opening the site in a new tab, or coming back to it after leaving asks again.',
+  switch:
+    'Like "every time the page is opened", and the tab also locks as soon as you switch to another tab. Coming back asks again (the page reloads after unlocking).',
+};
+
+function isSiteUnlocked(site) {
+  return (
+    site.id in state.unlocked ||
+    Object.values(state.tabUnlocks).some((g) => g.siteId === site.id)
+  );
+}
+
 function minutesLabel(m) {
   if (m === 0) return 'until Chrome is closed';
   if (m < 60) return `${m} minute${m === 1 ? '' : 's'}`;
@@ -63,7 +85,17 @@ function render() {
     }
     const right = document.createElement('span');
     right.className = 'row';
-    if (site.id in state.unlocked) {
+    const mode = document.createElement('select');
+    mode.title = 'When to ask for this site';
+    const defaultLabel = MODE_LABELS[settings.askMode].toLowerCase();
+    mode.add(new Option(`Default (${defaultLabel})`, 'default'));
+    for (const m of state.askModes) mode.add(new Option(MODE_LABELS[m], m));
+    mode.value = state.askModes.includes(site.askMode) ? site.askMode : 'default';
+    mode.addEventListener('change', () =>
+      saveSites(settings.sites.map((s) => (s.id === site.id ? { ...s, askMode: mode.value } : s))),
+    );
+    right.append(mode);
+    if (isSiteUnlocked(site)) {
       const lockBtn = document.createElement('button');
       lockBtn.textContent = 'Lock now';
       lockBtn.addEventListener('click', () => act(() => send('lockSite', { siteId: site.id })));
@@ -97,6 +129,12 @@ function render() {
     for (const m of state.unlockChoices) select.add(new Option(minutesLabel(m), String(m)));
   }
   select.value = String(settings.unlockMinutes);
+  $('ask-mode').value = settings.askMode;
+  $('ask-mode-hint').textContent = MODE_HINTS[settings.askMode];
+  // The duration only applies to sites that ask once per session.
+  const usesDuration =
+    settings.askMode === 'session' || settings.sites.some((s) => s.askMode === 'session');
+  $('unlock-minutes-field').classList.toggle('hidden', !usesDuration);
   $('lock-on-system-lock').checked = settings.lockOnSystemLock;
   $('guard-extensions').checked = settings.guardExtensionsPage;
 
@@ -123,7 +161,11 @@ function update(patch) {
 
 function saveSites(sites) {
   return update({
-    sites: sites.map((s) => ({ pattern: s.pattern ?? formatPattern(s), label: s.label || '' })),
+    sites: sites.map((s) => ({
+      pattern: s.pattern ?? formatPattern(s),
+      label: s.label || '',
+      askMode: s.askMode || 'default',
+    })),
   });
 }
 
@@ -147,6 +189,7 @@ $('verify').addEventListener('click', () =>
 );
 
 $('enabled').addEventListener('change', (e) => update({ enabled: e.target.checked }));
+$('ask-mode').addEventListener('change', (e) => update({ askMode: e.target.value }));
 $('unlock-minutes').addEventListener('change', (e) =>
   update({ unlockMinutes: Number(e.target.value) }),
 );
